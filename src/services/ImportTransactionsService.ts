@@ -1,10 +1,10 @@
-import csvParse from 'csv-parse';
+import csvtojson from 'csvtojson';
 import fs from 'fs';
 import path from 'path';
 
 import uploadConfig from '../config/upload';
 import Transaction from '../models/Transaction';
-import CreateTransactionsService from './CreateTransactionService';
+import CreateTransactionService from './CreateTransactionService';
 
 interface Request {
   csvFilename: string;
@@ -13,42 +13,21 @@ interface Request {
 class ImportTransactionsService {
   async execute({ csvFilename }: Request): Promise<Transaction[]> {
     const csvFilePath = path.join(uploadConfig.directory, csvFilename);
+    const importedTransactions = await csvtojson().fromFile(csvFilePath);
 
-    const readCSVStream = fs.createReadStream(csvFilePath);
+    const transactions: Transaction[] = [];
 
-    const parseStream = csvParse({
-      from_line: 2,
-      ltrim: true,
-      rtrim: true,
-    });
+    const createTransactionService = new CreateTransactionService();
 
-    const parseCSV = readCSVStream.pipe(parseStream);
+    for (const importedTransaction of importedTransactions) {
+      const transaction = await createTransactionService.execute(
+        importedTransaction,
+      );
 
-    const lines: any[] = [];
+      transactions.push(transaction);
+    }
 
-    parseCSV.on('data', line => {
-      lines.push(line);
-    });
-
-    await new Promise(resolve => {
-      parseCSV.on('end', resolve);
-    });
-
-    const createTransactionService = new CreateTransactionsService();
-
-    const transactions: Transaction[] = await Promise.all(
-      lines.map(
-        async (line: any): Promise<Transaction> => {
-          const transaction = await createTransactionService.execute({
-            title: line[0],
-            type: line[1],
-            value: line[2],
-            category: line[3],
-          });
-          return transaction;
-        },
-      ),
-    );
+    await fs.promises.unlink(csvFilePath);
 
     return transactions;
   }
